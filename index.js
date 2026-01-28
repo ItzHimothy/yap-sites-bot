@@ -71,16 +71,57 @@ client.on("guildCreate", async (guild) => {
    BASIC MESSAGE HANDLER (TEMP)
 ================================ */
 client.on("messageCreate", async (message) => {
+  // Ignore bots & DMs
   if (message.author.bot) return;
   if (!message.guild) return;
+
+  // Server lock
   if (message.guild.id !== ALLOWED_GUILD_ID) return;
+
+  const content = message.content.toLowerCase();
+
+  /* =====================
+     AUTO-MOD
+  ===================== */
+
+  // Block Discord invites
+  if (/discord\.gg|discord\.com\/invite/.test(content)) {
+    await message.delete().catch(() => {});
+    return message.channel.send({
+      content: `🚫 ${message.author}, Discord invites are not allowed.`,
+    });
+  }
+
+  // Block YouTube links
+  if (/youtube\.com|youtu\.be/.test(content)) {
+    await message.delete().catch(() => {});
+    return message.channel.send({
+      content: `🚫 ${message.author}, YouTube links are not allowed.`,
+    });
+  }
+
+  // Anti-caps (70%+)
+  const letters = message.content.replace(/[^a-zA-Z]/g, "");
+  if (letters.length >= 8) {
+    const caps = letters.replace(/[^A-Z]/g, "").length;
+    if (caps / letters.length > 0.7) {
+      await message.delete().catch(() => {});
+      return message.channel.send({
+        content: `🔠 ${message.author}, please don’t spam caps.`,
+      });
+    }
+  }
+
+  /* =====================
+     COMMAND HANDLER
+  ===================== */
 
   if (!message.content.startsWith(PREFIX)) return;
 
   const args = message.content.slice(PREFIX.length).trim().split(/ +/);
-  const commandName = args.shift().toLowerCase();
+  const command = args.shift().toLowerCase();
 
-  if (commandName === "ping") {
+  if (command === "ping") {
     return message.reply(`🏓 Pong! ${client.ws.ping}ms`);
   }
 });
