@@ -1,113 +1,114 @@
-require("dotenv").config();
 const {
   Client,
   GatewayIntentBits,
+  Partials,
   PermissionsBitField,
-  ChannelType
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
 } = require("discord.js");
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.DirectMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
-  ]
+    GatewayIntentBits.MessageContent
+  ],
+  partials: [Partials.Channel]
 });
 
-// ===== CONFIG (FILLED) =====
-const GUILD_ID = "1465718425765679135";
-const TICKET_CATEGORY_ID = "1465723833729286144";
+// CONFIG
 const STAFF_ROLE_ID = "1465948974111396014";
-// ===========================
+const CATEGORY_ID = "1465723833729286144";
 
 client.once("ready", () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log(`Logged in as ${client.user.tag}`);
 });
 
-// DM ticket flow
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
+  if (message.content !== "!ticket") return;
 
-  // ===== DMs ONLY =====
-  if (message.channel.type === ChannelType.DM) {
-    const content = message.content.trim().toUpperCase();
+  // delete user's message
+  await message.delete().catch(() => {});
 
-    // Step 1: Send ticket options
-    if (content === "!TICKET") {
-      return message.author.send(
-        `🎟 **Ticket Options**\n\n` +
-        `A️⃣ Payment (IRL money)\n` +
-        `B️⃣ In-game items\n` +
-        `C️⃣ Refund\n\n` +
-        `Reply with **A**, **B**, or **C**`
-      );
-    }
+  // buttons
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("ticket_payment")
+      .setLabel("💰 Payment (IRL)")
+      .setStyle(ButtonStyle.Primary),
 
-    // Step 2: Handle selection
-    if (!["A", "B", "C"].includes(content)) return;
+    new ButtonBuilder()
+      .setCustomId("ticket_items")
+      .setLabel("🎮 In-game items")
+      .setStyle(ButtonStyle.Success),
 
-    const selectionMap = {
-      A: "payment",
-      B: "ingame",
-      C: "refund"
-    };
+    new ButtonBuilder()
+      .setCustomId("ticket_refund")
+      .setLabel("🔄 Refund")
+      .setStyle(ButtonStyle.Danger)
+  );
 
-    const guild = await client.guilds.fetch(GUILD_ID);
-    const member = await guild.members.fetch(message.author.id);
+  await message.channel.send({
+    content: "🎫 **Open a ticket**\nChoose a reason:",
+    components: [row]
+  });
+});
 
-    const ticketChannel = await guild.channels.create({
-      name: `ticket-${selectionMap[content]}-${member.user.username}`,
-      type: ChannelType.GuildText,
-      parent: TICKET_CATEGORY_ID,
-      permissionOverwrites: [
-        {
-          id: guild.id,
-          deny: [PermissionsBitField.Flags.ViewChannel]
-        },
-        {
-          id: STAFF_ROLE_ID,
-          allow: [
-            PermissionsBitField.Flags.ViewChannel,
-            PermissionsBitField.Flags.SendMessages,
-            PermissionsBitField.Flags.ReadMessageHistory
-          ]
-        },
-        {
-          id: member.id,
-          allow: [
-            PermissionsBitField.Flags.ViewChannel,
-            PermissionsBitField.Flags.SendMessages,
-            PermissionsBitField.Flags.ReadMessageHistory
-          ]
-        }
-      ]
-    });
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isButton()) return;
 
-    await ticketChannel.send(
-      `🎫 **New Ticket Created**\n\n` +
-      `👤 User: ${member}\n` +
-      `📌 Type: **${selectionMap[content].toUpperCase()}**\n\n` +
-      `A staff member will assist you shortly.\n\n` +
-      `🔒 Staff can use \`!close\` to close this ticket.`
-    );
+  const typeMap = {
+    ticket_payment: "payment",
+    ticket_items: "items",
+    ticket_refund: "refund"
+  };
 
-    return message.author.send(
-      `✅ Your ticket has been created:\n${ticketChannel}`
-    );
-  }
+  const type = typeMap[interaction.customId];
+  if (!type) return;
 
-  // ===== CLOSE COMMAND (STAFF ONLY) =====
-  if (message.content === "!close") {
-    if (
-      !message.member.roles.cache.has(STAFF_ROLE_ID) &&
-      !message.member.permissions.has(PermissionsBitField.Flags.Administrator)
-    ) return;
+  const guild = interaction.guild;
+  const user = interaction.user;
 
-    await message.channel.send("🔒 Closing ticket in 3 seconds...");
-    setTimeout(() => message.channel.delete(), 3000);
-  }
+  // create channel
+  const channel = await guild.channels.create({
+    name: `ticket-${type}-${user.username}`.toLowerCase(),
+    parent: CATEGORY_ID,
+    permissionOverwrites: [
+      {
+        id: guild.id,
+        deny: [PermissionsBitField.Flags.ViewChannel]
+      },
+      {
+        id: user.id,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory
+        ]
+      },
+      {
+        id: STAFF_ROLE_ID,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory
+        ]
+      }
+    ]
+  });
+
+  await channel.send(
+    `<@${user.id}> <@&${STAFF_ROLE_ID}>\n` +
+    `**Ticket Type:** ${type.toUpperCase()}\n` +
+    `Please describe your issue.`
+  );
+
+  await interaction.reply({
+    content: `✅ Ticket created: ${channel}`,
+    ephemeral: true
+  });
 });
 
 client.login(process.env.TOKEN);
