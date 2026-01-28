@@ -460,3 +460,71 @@ client.on("messageReactionRemove", async (reaction, user) => {
 });
 
 client.login(process.env.TOKEN);
+const { 
+  Client, 
+  GatewayIntentBits, 
+  PermissionsBitField 
+} = require("discord.js");
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
+});
+
+const PREFIX = "!";
+
+client.once("ready", () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
+});
+
+client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
+  if (!message.content.startsWith(PREFIX)) return;
+
+  const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
+  const command = args.shift().toLowerCase();
+
+  if (command === "purge") {
+    // Permission check
+    if (
+      !message.member.permissions.has(PermissionsBitField.Flags.Administrator)
+    ) {
+      return message.reply("❌ You don’t have permission to use this command.");
+    }
+
+    // Delete command message
+    await message.delete().catch(() => {});
+
+    const amount = args[0];
+
+    if (!amount) return;
+
+    // PURGE ALL
+    if (amount === "all") {
+      let fetched;
+      do {
+        fetched = await message.channel.messages.fetch({ limit: 100 });
+        await message.channel.bulkDelete(fetched, true);
+      } while (fetched.size >= 2);
+
+      return;
+    }
+
+    // PURGE NUMBER
+    const deleteCount = parseInt(amount);
+    if (isNaN(deleteCount) || deleteCount < 1 || deleteCount > 100) {
+      return;
+    }
+
+    const messages = await message.channel.messages.fetch({
+      limit: deleteCount + 1
+    });
+
+    await message.channel.bulkDelete(messages, true);
+  }
+});
+
+client.login(process.env.TOKEN);
