@@ -14,8 +14,11 @@ const {
 
 const PREFIX = "!";
 const ALLOWED_GUILD_ID = "1465718425765679135";
+
 const TICKET_CATEGORY_ID = "1465723833729286144";
-const STAFF_ROLE_ID = "1465948974111396014";
+const STAFF_ROLE_ID = "1466320528670195895"; // Dev Support Team
+const DEV_ROLE_ID = "1466321400553017525";   // Developer
+
 const LOG_CHANNEL_ID = "1465725426704977981";
 const WELCOME_CHANNEL_ID = "1465721058991538197";
 const AUTO_ROLE_ID = "1466047773161033885";
@@ -184,7 +187,8 @@ client.on("interactionCreate", async (interaction) => {
     permissionOverwrites: [
       { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
       { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
-      { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+      { id: STAFF_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+      { id: DEV_ROLE_ID, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
     ]
   });
 
@@ -193,11 +197,12 @@ client.on("interactionCreate", async (interaction) => {
   );
 
   await channel.send({
-    content: `👋 Hello ${interaction.user}\nTell us more about your request.`,
+    content: `👋 Hello ${interaction.user}\nTell us more about your request.\n\n<@&${STAFF_ROLE_ID}> <@&${DEV_ROLE_ID}>`,
     components: [closeBtn]
   });
 
   interaction.reply({ content: `✅ Ticket created: ${channel}`, ephemeral: true });
+
   client.channels.cache.get(LOG_CHANNEL_ID)
     ?.send(`🎟️ Ticket created by ${interaction.user} → ${channel}`);
 });
