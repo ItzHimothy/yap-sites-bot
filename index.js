@@ -38,8 +38,7 @@ const client = new Client({
 /* ================= FILTERS ================= */
 
 const badWords = ["fuck","shit","nigger","nigga","faggot","retard","cunt"];
-const inviteRegex = /(discord\.gg|discord\.com\/invite)/i;
-const youtubeRegex = /(youtube\.com|youtu\.be)/i;
+const linkRegex = /(https?:\/\/|www\.|discord\.gg|discord\.com\/invite|youtube\.com|youtu\.be)/i;
 
 /* ================= READY ================= */
 
@@ -79,17 +78,27 @@ client.on("messageCreate", async (message) => {
 
   const content = message.content.toLowerCase();
 
-  /* ---- Anti Advertising ---- */
-  if (inviteRegex.test(content) || youtubeRegex.test(content)) {
-    await message.delete().catch(() => {});
-    return message.channel.send(`🚫 ${message.author}, advertising is not allowed.`);
+  /* ---- Anti Advertising (ADMIN ONLY ALLOWED) ---- */
+  if (linkRegex.test(content)) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
+      await message.delete().catch(() => {});
+      const warn = await message.channel.send(
+        `🚫 ${message.author}, advertising is not allowed.`
+      );
+      setTimeout(() => warn.delete().catch(() => {}), 5000);
+      return;
+    }
   }
 
   /* ---- Anti Swear ---- */
   if (badWords.some(w => content.includes(w))) {
     await message.delete().catch(() => {});
     await message.member.timeout(5 * 60 * 1000, "Swearing");
-    return message.channel.send(`🤬 ${message.author} muted for swearing.`);
+    const warn = await message.channel.send(
+      `🤬 ${message.author} muted for swearing.`
+    );
+    setTimeout(() => warn.delete().catch(() => {}), 5000);
+    return;
   }
 
   if (!content.startsWith(PREFIX)) return;
