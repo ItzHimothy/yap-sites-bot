@@ -35,6 +35,10 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel]
 });
 
+/* ================= INVITE CACHE ================= */
+
+const invitesCache = new Map();
+
 /* ================= FILTERS ================= */
 
 const badWords = ["fuck","shit","nigger","nigga","faggot","retard","cunt"];
@@ -42,32 +46,61 @@ const linkRegex = /(https?:\/\/|www\.|discord\.gg|discord\.com\/invite|youtube\.
 
 /* ================= READY ================= */
 
-client.once("ready", () => {
+client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
-  client.guilds.cache.forEach(g => {
-    if (g.id !== ALLOWED_GUILD_ID) g.leave();
+
+  client.guilds.cache.forEach(async g => {
+    if (g.id !== ALLOWED_GUILD_ID) return g.leave();
+
+    const invites = await g.invites.fetch().catch(() => null);
+    if (invites) invitesCache.set(g.id, invites);
   });
 });
 
-/* ================= WELCOME + AUTOROLE ================= */
+/* ================= WELCOME + AUTOROLE + INVITES ================= */
 
 client.on("guildMemberAdd", async (member) => {
   if (member.guild.id !== ALLOWED_GUILD_ID) return;
 
+  // Auto role
   await member.roles.add(AUTO_ROLE_ID).catch(() => {});
+
+  // Invite tracking
+  let inviter = "Unknown";
+  let inviteCount = "Unknown";
+
+  const oldInvites = invitesCache.get(member.guild.id);
+  const newInvites = await member.guild.invites.fetch().catch(() => null);
+  invitesCache.set(member.guild.id, newInvites);
+
+  if (oldInvites && newInvites) {
+    const usedInvite = newInvites.find(i => oldInvites.get(i.code)?.uses < i.uses);
+    if (usedInvite) {
+      inviter = usedInvite.inviter?.tag || "Unknown";
+      inviteCount = newInvites
+        .filter(i => i.inviter?.id === usedInvite.inviter?.id)
+        .reduce((a, b) => a + b.uses, 0);
+    }
+  }
+
+  // Welcome
   const ch = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
-  if (!ch) return;
+  if (ch) {
+    const embed = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle("👋 Welcome to Yap Sites!")
+      .setDescription(
+        `Welcome **${member.user.username}**!\n\n📩 Invited by: **${inviter}**`
+      )
+      .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
+      .setTimestamp();
 
-  const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle("👋 Welcome to Yap Sites!")
-    .setDescription(
-      `Welcome **${member.user.username}**!\n\n👥 Members now: **${member.guild.memberCount}**`
-    )
-    .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-    .setTimestamp();
+    ch.send({ embeds: [embed] });
+  }
 
-  ch.send({ embeds: [embed] });
+  // Log
+  client.channels.cache.get(LOG_CHANNEL_ID)
+    ?.send(`📥 **${member.user.tag} joined**\n📩 Invited by: **${inviter}**\n📊 Total invites: **${inviteCount}**`);
 });
 
 /* ================= MESSAGE HANDLER ================= */
@@ -78,7 +111,7 @@ client.on("messageCreate", async (message) => {
 
   const content = message.content.toLowerCase();
 
-  /* ---- Anti Advertising (ADMIN ONLY ALLOWED) ---- */
+  /* ---- Anti Advertising (ADMIN ONLY) ---- */
   if (linkRegex.test(content)) {
     if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
       await message.delete().catch(() => {});
@@ -130,6 +163,7 @@ client.on("messageCreate", async (message) => {
 
   if (cmd === "gstart") {
     if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
     const minutes = parseInt(args.shift());
     const winners = parseInt(args.shift());
     const prize = args.join(" ");
@@ -145,8 +179,7 @@ client.on("messageCreate", async (message) => {
 
     setTimeout(async () => {
       const fetched = await msg.fetch();
-      const users = (await fetched.reactions.cache.get("🎉").users.fetch())
-        .filter(u => !u.bot);
+      const users = (await fetched.reactions.cache.get("🎉").users.fetch()).filter(u => !u.bot);
       if (!users.size) return message.channel.send("❌ No valid entries.");
       const picked = users.random(winners);
       message.channel.send(`🎉 Winner(s): ${picked} — **${prize}**`);
@@ -155,16 +188,15 @@ client.on("messageCreate", async (message) => {
 
   if (cmd === "greroll") {
     if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
     const id = args[0];
     if (!id) return message.reply("❌ Provide giveaway message ID.");
 
     try {
       const gMsg = await message.channel.messages.fetch(id);
-      const users = (await gMsg.reactions.cache.get("🎉").users.fetch())
-        .filter(u => !u.bot);
+      const users = (await gMsg.reactions.cache.get("🎉").users.fetch()).filter(u => !u.bot);
       if (!users.size) return message.reply("❌ No participants.");
-      const winner = users.random();
-      message.channel.send(`🔁 **REROLL WINNER:** ${winner} 🎉`);
+      message.channel.send(`🔁 **REROLL WINNER:** ${users.random()} 🎉`);
     } catch {
       message.reply("❌ Invalid message ID.");
     }
