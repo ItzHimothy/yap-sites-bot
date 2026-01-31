@@ -51,7 +51,6 @@ client.once("ready", async () => {
 
   client.guilds.cache.forEach(async g => {
     if (g.id !== ALLOWED_GUILD_ID) return g.leave();
-
     const invites = await g.invites.fetch().catch(() => null);
     if (invites) invitesCache.set(g.id, invites);
   });
@@ -62,10 +61,8 @@ client.once("ready", async () => {
 client.on("guildMemberAdd", async (member) => {
   if (member.guild.id !== ALLOWED_GUILD_ID) return;
 
-  // Auto role
   await member.roles.add(AUTO_ROLE_ID).catch(() => {});
 
-  // Invite tracking
   let inviter = "Unknown";
   let inviteCount = "Unknown";
 
@@ -83,7 +80,6 @@ client.on("guildMemberAdd", async (member) => {
     }
   }
 
-  // Welcome
   const ch = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
   if (ch) {
     const embed = new EmbedBuilder()
@@ -94,11 +90,9 @@ client.on("guildMemberAdd", async (member) => {
       )
       .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
       .setTimestamp();
-
     ch.send({ embeds: [embed] });
   }
 
-  // Log
   client.channels.cache.get(LOG_CHANNEL_ID)
     ?.send(`📥 **${member.user.tag} joined**\n📩 Invited by: **${inviter}**\n📊 Total invites: **${inviteCount}**`);
 });
@@ -115,9 +109,7 @@ client.on("messageCreate", async (message) => {
   if (linkRegex.test(content)) {
     if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
       await message.delete().catch(() => {});
-      const warn = await message.channel.send(
-        `🚫 ${message.author}, advertising is not allowed.`
-      );
+      const warn = await message.channel.send(`🚫 ${message.author}, advertising is not allowed.`);
       setTimeout(() => warn.delete().catch(() => {}), 5000);
       return;
     }
@@ -127,9 +119,7 @@ client.on("messageCreate", async (message) => {
   if (badWords.some(w => content.includes(w))) {
     await message.delete().catch(() => {});
     await message.member.timeout(5 * 60 * 1000, "Swearing");
-    const warn = await message.channel.send(
-      `🤬 ${message.author} muted for swearing.`
-    );
+    const warn = await message.channel.send(`🤬 ${message.author} muted for swearing.`);
     setTimeout(() => warn.delete().catch(() => {}), 5000);
     return;
   }
@@ -142,7 +132,6 @@ client.on("messageCreate", async (message) => {
 
   if (cmd === "ticketpanel") {
     await message.delete().catch(() => {});
-
     const embed = new EmbedBuilder()
       .setTitle("🎟️ Open a Ticket")
       .setDescription("What would you like your website to be about?")
@@ -178,11 +167,9 @@ client.on("messageCreate", async (message) => {
     await msg.react("🎉");
 
     setTimeout(async () => {
-      const fetched = await msg.fetch();
-      const users = (await fetched.reactions.cache.get("🎉").users.fetch()).filter(u => !u.bot);
+      const users = (await msg.reactions.cache.get("🎉").users.fetch()).filter(u => !u.bot);
       if (!users.size) return message.channel.send("❌ No valid entries.");
-      const picked = users.random(winners);
-      message.channel.send(`🎉 Winner(s): ${picked} — **${prize}**`);
+      message.channel.send(`🎉 Winner(s): ${users.random(winners)} — **${prize}**`);
     }, minutes * 60000);
   }
 
@@ -192,11 +179,29 @@ client.on("messageCreate", async (message) => {
     const id = args[0];
     if (!id) return message.reply("❌ Provide giveaway message ID.");
 
+    const gMsg = await message.channel.messages.fetch(id);
+    const users = (await gMsg.reactions.cache.get("🎉").users.fetch()).filter(u => !u.bot);
+    if (!users.size) return message.reply("❌ No participants.");
+    message.channel.send(`🔁 **REROLL WINNER:** ${users.random()} 🎉`);
+  }
+
+  /* ================= END GIVEAWAY ================= */
+
+  if (cmd === "end") {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+
+    const id = args[0];
+    if (!id) return message.reply("❌ Provide giveaway message ID.");
+
     try {
       const gMsg = await message.channel.messages.fetch(id);
-      const users = (await gMsg.reactions.cache.get("🎉").users.fetch()).filter(u => !u.bot);
-      if (!users.size) return message.reply("❌ No participants.");
-      message.channel.send(`🔁 **REROLL WINNER:** ${users.random()} 🎉`);
+      const reaction = gMsg.reactions.cache.get("🎉");
+      if (!reaction) return message.reply("❌ No 🎉 reactions found.");
+
+      const users = (await reaction.users.fetch()).filter(u => !u.bot);
+      if (!users.size) return message.channel.send("❌ No valid entries.");
+
+      message.channel.send(`⏹️ **GIVEAWAY ENDED**\n🎉 Winner: ${users.random()}`);
     } catch {
       message.reply("❌ Invalid message ID.");
     }
@@ -216,9 +221,8 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   const [type, ownerId] = interaction.customId.split("_");
-  if (interaction.user.id !== ownerId) {
+  if (interaction.user.id !== ownerId)
     return interaction.reply({ content: "❌ Not your panel.", ephemeral: true });
-  }
 
   await interaction.message.delete().catch(() => {});
 
