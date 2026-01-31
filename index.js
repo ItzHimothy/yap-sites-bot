@@ -16,8 +16,8 @@ const PREFIX = "!";
 const ALLOWED_GUILD_ID = "1465718425765679135";
 
 const TICKET_CATEGORY_ID = "1465723833729286144";
-const STAFF_ROLE_ID = "1466320528670195895"; // Dev Support Team
-const DEV_ROLE_ID = "1466321400553017525";   // Developer
+const STAFF_ROLE_ID = "1466320528670195895";
+const DEV_ROLE_ID = "1466321400553017525";
 
 const LOG_CHANNEL_ID = "1465725426704977981";
 const WELCOME_CHANNEL_ID = "1465721058991538197";
@@ -30,12 +30,13 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.MessageContent
   ],
-  partials: [Partials.Message, Partials.Channel]
+  partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
 
-/* ================= INVITE CACHE ================= */
+/* ================= INVITES ================= */
 
 const invitesCache = new Map();
 
@@ -49,52 +50,57 @@ const linkRegex = /(https?:\/\/|www\.|discord\.gg|discord\.com\/invite|youtube\.
 client.once("ready", async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 
-  client.guilds.cache.forEach(async g => {
-    if (g.id !== ALLOWED_GUILD_ID) return g.leave();
-    const invites = await g.invites.fetch().catch(() => null);
-    if (invites) invitesCache.set(g.id, invites);
-  });
+  for (const guild of client.guilds.cache.values()) {
+    if (guild.id !== ALLOWED_GUILD_ID) {
+      await guild.leave();
+      continue;
+    }
+
+    const invites = await guild.invites.fetch().catch(() => null);
+    if (invites) invitesCache.set(guild.id, invites);
+  }
 });
 
-/* ================= WELCOME + AUTOROLE + INVITES ================= */
+/* ================= WELCOME + INVITES ================= */
 
 client.on("guildMemberAdd", async (member) => {
   if (member.guild.id !== ALLOWED_GUILD_ID) return;
 
   await member.roles.add(AUTO_ROLE_ID).catch(() => {});
 
-  let inviter = "Unknown";
-  let inviteCount = "Unknown";
+  let inviterText = "Vanity / Discovery";
 
   const oldInvites = invitesCache.get(member.guild.id);
   const newInvites = await member.guild.invites.fetch().catch(() => null);
   invitesCache.set(member.guild.id, newInvites);
 
   if (oldInvites && newInvites) {
-    const usedInvite = newInvites.find(i => oldInvites.get(i.code)?.uses < i.uses);
-    if (usedInvite) {
-      inviter = usedInvite.inviter?.tag || "Unknown";
-      inviteCount = newInvites
-        .filter(i => i.inviter?.id === usedInvite.inviter?.id)
-        .reduce((a, b) => a + b.uses, 0);
+    const usedInvite = newInvites.find(
+      i => (oldInvites.get(i.code)?.uses ?? 0) < (i.uses ?? 0)
+    );
+    if (usedInvite?.inviter) {
+      inviterText = usedInvite.inviter.tag;
     }
   }
 
-  const ch = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
-  if (ch) {
-    const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle("👋 Welcome to Yap Sites!")
-      .setDescription(
-        `Welcome **${member.user.username}**!\n\n📩 Invited by: **${inviter}**`
-      )
-      .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-      .setTimestamp();
-    ch.send({ embeds: [embed] });
+  const welcome = member.guild.channels.cache.get(WELCOME_CHANNEL_ID);
+  if (welcome) {
+    welcome.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(0x5865f2)
+          .setTitle("👋 Welcome to Yap Sites!")
+          .setDescription(
+            `Welcome **${member.user.username}**!\n📩 Invited by: **${inviterText}**`
+          )
+          .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
+          .setTimestamp()
+      ]
+    });
   }
 
   client.channels.cache.get(LOG_CHANNEL_ID)
-    ?.send(`📥 **${member.user.tag} joined**\n📩 Invited by: **${inviter}**\n📊 Total invites: **${inviteCount}**`);
+    ?.send(`📥 **${member.user.tag} joined**\n📩 Invited by: **${inviterText}**`);
 });
 
 /* ================= MESSAGE HANDLER ================= */
@@ -105,106 +111,46 @@ client.on("messageCreate", async (message) => {
 
   const content = message.content.toLowerCase();
 
-  /* ---- Anti Advertising (ADMIN ONLY) ---- */
+  /* ---- Anti Ads ---- */
   if (linkRegex.test(content)) {
     if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
       await message.delete().catch(() => {});
-      const warn = await message.channel.send(`🚫 ${message.author}, advertising is not allowed.`);
-      setTimeout(() => warn.delete().catch(() => {}), 5000);
-      return;
+      return message.channel.send(`🚫 ${message.author}, advertising is not allowed.`)
+        .then(m => setTimeout(() => m.delete(), 5000));
     }
   }
 
   /* ---- Anti Swear ---- */
   if (badWords.some(w => content.includes(w))) {
     await message.delete().catch(() => {});
-    await message.member.timeout(5 * 60 * 1000, "Swearing");
-    const warn = await message.channel.send(`🤬 ${message.author} muted for swearing.`);
-    setTimeout(() => warn.delete().catch(() => {}), 5000);
+    await message.member.timeout(5 * 60 * 1000, "Swearing").catch(() => {});
     return;
   }
 
   if (!content.startsWith(PREFIX)) return;
-  const args = content.slice(PREFIX.length).trim().split(/ +/);
-  const cmd = args.shift();
 
-  /* ================= TICKET PANEL ================= */
+  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+  const cmd = args.shift()?.toLowerCase();
+
+  /* ================= TICKET PANEL (ADMIN ONLY) ================= */
 
   if (cmd === "ticketpanel") {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator))
+      return message.reply("❌ Admin only.");
+
     await message.delete().catch(() => {});
+
     const embed = new EmbedBuilder()
       .setTitle("🎟️ Open a Ticket")
       .setDescription("What would you like your website to be about?")
       .setColor(0x5865f2);
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`web_${message.author.id}`).setLabel("🌐 Website Idea").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`feat_${message.author.id}`).setLabel("⚙️ Features").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`part_${message.author.id}`).setLabel("🤝 Partnership").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`web_${message.author.id}`).setLabel("🌐 Website").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`apply_${message.author.id}`).setLabel("🧑‍💼 Staff Apply").setStyle(ButtonStyle.Danger)
     );
 
-    const panel = await message.channel.send({ embeds: [embed], components: [row] });
-    setTimeout(() => panel.delete().catch(() => {}), 120000);
-  }
-
-  /* ================= GIVEAWAYS ================= */
-
-  if (cmd === "gstart") {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
-
-    const minutes = parseInt(args.shift());
-    const winners = parseInt(args.shift());
-    const prize = args.join(" ");
-    if (!minutes || !winners || !prize) return;
-
-    const embed = new EmbedBuilder()
-      .setTitle("🎉 GIVEAWAY 🎉")
-      .setDescription(`🎁 **Prize:** ${prize}\n🏆 **Winners:** ${winners}\n⏰ Ends in ${minutes} minutes`)
-      .setColor(0xffc107);
-
-    const msg = await message.channel.send({ embeds: [embed] });
-    await msg.react("🎉");
-
-    setTimeout(async () => {
-      const users = (await msg.reactions.cache.get("🎉").users.fetch()).filter(u => !u.bot);
-      if (!users.size) return message.channel.send("❌ No valid entries.");
-      message.channel.send(`🎉 Winner(s): ${users.random(winners)} — **${prize}**`);
-    }, minutes * 60000);
-  }
-
-  if (cmd === "greroll") {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
-
-    const id = args[0];
-    if (!id) return message.reply("❌ Provide giveaway message ID.");
-
-    const gMsg = await message.channel.messages.fetch(id);
-    const users = (await gMsg.reactions.cache.get("🎉").users.fetch()).filter(u => !u.bot);
-    if (!users.size) return message.reply("❌ No participants.");
-    message.channel.send(`🔁 **REROLL WINNER:** ${users.random()} 🎉`);
-  }
-
-  /* ================= END GIVEAWAY ================= */
-
-  if (cmd === "end") {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) return;
-
-    const id = args[0];
-    if (!id) return message.reply("❌ Provide giveaway message ID.");
-
-    try {
-      const gMsg = await message.channel.messages.fetch(id);
-      const reaction = gMsg.reactions.cache.get("🎉");
-      if (!reaction) return message.reply("❌ No 🎉 reactions found.");
-
-      const users = (await reaction.users.fetch()).filter(u => !u.bot);
-      if (!users.size) return message.channel.send("❌ No valid entries.");
-
-      message.channel.send(`⏹️ **GIVEAWAY ENDED**\n🎉 Winner: ${users.random()}`);
-    } catch {
-      message.reply("❌ Invalid message ID.");
-    }
+    message.channel.send({ embeds: [embed], components: [row] });
   }
 });
 
@@ -214,20 +160,29 @@ client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
   if (interaction.guild.id !== ALLOWED_GUILD_ID) return;
 
-  if (interaction.customId === "close_ticket") {
-    client.channels.cache.get(LOG_CHANNEL_ID)
-      ?.send(`🔒 Ticket closed → ${interaction.channel.name}`);
-    return interaction.channel.delete();
-  }
-
   const [type, ownerId] = interaction.customId.split("_");
+
   if (interaction.user.id !== ownerId)
     return interaction.reply({ content: "❌ Not your panel.", ephemeral: true });
+
+  // ONE TICKET PER USER
+  const existing = interaction.guild.channels.cache.find(
+    c =>
+      c.parentId === TICKET_CATEGORY_ID &&
+      c.permissionOverwrites.cache.has(interaction.user.id)
+  );
+
+  if (existing) {
+    return interaction.reply({
+      content: `❌ You already have an open ticket: ${existing}`,
+      ephemeral: true
+    });
+  }
 
   await interaction.message.delete().catch(() => {});
 
   const channel = await interaction.guild.channels.create({
-    name: `ticket-${type}-${interaction.user.username}`,
+    name: `ticket-${interaction.user.username}`.toLowerCase(),
     parent: TICKET_CATEGORY_ID,
     permissionOverwrites: [
       { id: interaction.guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
@@ -238,33 +193,18 @@ client.on("interactionCreate", async (interaction) => {
   });
 
   const closeBtn = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("close_ticket").setLabel("🔒 Close Ticket").setStyle(ButtonStyle.Danger)
+    new ButtonBuilder()
+      .setCustomId("close_ticket")
+      .setLabel("🔒 Close Ticket")
+      .setStyle(ButtonStyle.Danger)
   );
 
   await channel.send({
-    content: `👋 Hello ${interaction.user}\nTell us more about your request.\n\n<@&${STAFF_ROLE_ID}> <@&${DEV_ROLE_ID}>`,
+    content: `👋 Hello ${interaction.user}\nPlease describe your request.\n<@&${STAFF_ROLE_ID}>`,
     components: [closeBtn]
   });
 
   interaction.reply({ content: `✅ Ticket created: ${channel}`, ephemeral: true });
-
-  client.channels.cache.get(LOG_CHANNEL_ID)
-    ?.send(`🎟️ Ticket created by ${interaction.user} → ${channel}`);
-});
-
-/* ================= MESSAGE LOGS ================= */
-
-client.on("messageDelete", (msg) => {
-  if (!msg.guild || msg.guild.id !== ALLOWED_GUILD_ID || !msg.content) return;
-  client.channels.cache.get(LOG_CHANNEL_ID)
-    ?.send(`🗑️ Deleted | ${msg.author} | ${msg.channel}\n${msg.content}`);
-});
-
-client.on("messageUpdate", (o, n) => {
-  if (!o.guild || o.guild.id !== ALLOWED_GUILD_ID) return;
-  if (o.content === n.content) return;
-  client.channels.cache.get(LOG_CHANNEL_ID)
-    ?.send(`✏️ Edited | ${o.author}\nBefore: ${o.content}\nAfter: ${n.content}`);
 });
 
 /* ================= LOGIN ================= */
